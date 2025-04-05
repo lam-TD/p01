@@ -72,9 +72,6 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'two_factor_secret',
-        'two_factor_recovery_codes',
-        'two_factor_confirmed_at',
     ];
 
     /**
@@ -85,8 +82,6 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
-        'two_factor_recovery_codes',
-        'two_factor_secret',
     ];
 
     /**
@@ -96,7 +91,6 @@ class User extends Authenticatable
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'two_factor_confirmed_at' => 'datetime',
     ];
 
     /**
@@ -105,52 +99,13 @@ class User extends Authenticatable
      * @var array
      */
     protected $appends = [
-        'profile_photo_url',
+
     ];
 
-    /**
-     * Get the default profile photo URL if no profile photo has been uploaded.
-     *
-     * @return string
-     */
-    protected function defaultProfilePhotoUrl()
+    public function payments()
     {
-        $name = trim(collect(explode(' ', $this->name))->map(function ($segment) {
-            return mb_substr($segment, 0, 1);
-        })->join(' '));
-
-        return 'https://ui-avatars.com/api/?name='.urlencode($name).'&color=7F9CF5&background=EBF4FF';
+        return $this->hasMany(Payment::class);
     }
 
-    /**
-     * Get the URL to the user's profile photo.
-     *
-     * @return string
-     */
-    public function getProfilePhotoUrlAttribute()
-    {
-        return $this->profile_photo_path
-                    ? Storage::disk($this->profilePhotoDisk())->url($this->profile_photo_path)
-                    : $this->defaultProfilePhotoUrl();
-    }
 
-    /**
-     * Get the disk that profile photos should be stored on.
-     *
-     * @return string
-     */
-    protected function profilePhotoDisk()
-    {
-        return isset($_ENV['VAPOR_ARTIFACT_NAME']) ? 's3' : config('jetstream.profile_photo_disk', 'public');
-    }
-
-    /**
-     * Get all tenants for this user.
-     */
-    public function tenants(): BelongsToMany
-    {
-        return $this->belongsToMany(Tenant::class)
-            ->withPivot('role')
-            ->withTimestamps();
-    }
 }

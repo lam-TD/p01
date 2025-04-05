@@ -12,22 +12,16 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Seed the central database with permission data
+        // Seed in the correct order to respect dependencies
         $this->call([
-            PermissionSeeder::class,
-            RoleSeeder::class,
-            TenantSeeder::class,
-            SuperAdminSeeder::class,
+            
+            // Then seed users (required for payments)
+            UserSeeder::class,
+            
+            // Then seed payment-related data
+            PaymentCategorySeeder::class,
+            PaymentMethodSeeder::class,
+            PaymentSeeder::class,
         ]);
-    }
-
-    public function runTenantSpecificSeeders()
-    {
-        // run tenant specific seeders
-    }
-
-    public function runLandlordSpecificSeeders()
-    {
-        // run landlord specific seeders
     }
 }
