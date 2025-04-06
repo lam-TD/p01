@@ -5,14 +5,17 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group"
-import { PaymentTable } from '@/pages/payment-table/PaymentTable'
 import qs from 'qs';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import dayjs from 'dayjs';
-
+import { columns, Payment } from '@/pages/payment-table/columns';
+import { DataTable } from '@/pages/payment-table/DataTable';
+import { ColumnFiltersState, RowSelectionState, SortingState, Table, VisibilityState, Row } from '@tanstack/react-table';
+import { TableCell, TableFooter, TableRow } from '@/components/ui/table';
+import { formatCurrency } from '@/lib/utils';
 export const Route = createFileRoute('/_private/dashboard/')({
   component: RouteComponent,
 });
@@ -41,17 +44,31 @@ export function MonthSelector({ value, onValueChange }: { value: any[], onValueC
   )
 }
 
-const getPaymentData = async ({ filter }: { filter: any }) => {
+export function PaymentTypeSelector({ value, onValueChange, options }: { value: any[], onValueChange: (value: any[]) => void, options: any[] }) {
+
+  return (
+    <ToggleGroup value={value} type="multiple" variant="outline" onValueChange={onValueChange}>
+      {options?.map((option) => (
+        <ToggleGroupItem key={option.id} value={option.id} aria-label={option.name}>
+          {option.name}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  )
+}
+
+const getPaymentData = async ({ sort, filter }: { sort: any, filter: any }) => {
   // convert to query string like ?filter[months]=1,2&filter[year]=2025
-  // filter[months] to string with '-' separated
+  // filter[months] to string with ',' separated
   const queryParams = qs.stringify({
+    sort: sort,
     filter: {
       ...filter,
-      months: filter.months.join('-'),
+      months: filter.months.join(','),
     }
   });
 
-  let url = `http://localhost:9999/api/payments?include=user,method,category&${queryParams}`;
+  let url = `http://localhost:9999/api/payments?include=user,method,category.paymentType&${queryParams}`;
 
 
   const response = await fetch(url, {
@@ -73,19 +90,45 @@ const getFilters = async () => {
   return data;
 }
 
+type PaymentFilter = {
+  months: number[],
+  year: string,
+  type: string[],
+  description: string,
+  category: string[],
+  method: string[],
+}
+
+const PaymentFooter = ({ table, colspan }: { table: Table<Payment>, colspan: number }) => {
+  
+  const total = table.getRowModel().rows.map((row) => Number(row.original.amount));
+
+  return <TableFooter>
+    <TableRow>
+      <TableCell colSpan={colspan} className="text-right">
+        Total: {formatCurrency(total.reduce((acc, amount) => acc + amount, 0))}
+      </TableCell>
+    </TableRow>
+  </TableFooter>
+}
 
 function RouteComponent() {
   const navigate = Route.useNavigate();
-  const [filter, setFilter] = useState({
+  const [sorting, setSorting] = useState<string>('');
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [filter, setFilter] = useState<PaymentFilter>({
     months: [dayjs().month() + 1],
     year: dayjs().year().toString(),
-
+    type: [],
+    description: '',
+    category: [],
+    method: [],
   })
 
   const { data, isPending, error } = useQuery({
-    queryKey: ['payments', filter],
+    queryKey: ['payments', filter, sorting],
     queryFn: async () => {
-      const data = await getPaymentData({filter});
+      const data = await getPaymentData({sort: sorting, filter});
       return data;
     },
   });
@@ -106,10 +149,35 @@ function RouteComponent() {
     setFilter({ ...filter, year: (value) });
   }
 
+  const handlePaymentTypeChange = (value: string[]) => {
+    setFilter({ ...filter, type: value });
+  }
+
+  const handleTableChange = (sorting: SortingState, columnVisibility: VisibilityState, rowSelection: RowSelectionState, columnFilters: ColumnFiltersState) => {
+    // console.log(sorting, columnVisibility, rowSelection, columnFilters);
+    // convert sorting to query string like ?sort=-payment_date
+    const sortQuery = sorting.map(sort => `${sort.desc ? '-' : ''}${sort.id}`).join(',');
+    setSorting(sortQuery);
+    setColumnVisibility(columnVisibility);
+
+    setFilter({
+      ...filter,
+      // months: columnFilters.find(filter => filter.id === 'months')?.value as number[],
+      // year: columnFilters.find(filter => filter.id === 'year')?.value as string,
+      description: columnFilters.find(filter => filter.id === 'description')?.value as string,
+      category: columnFilters.find(filter => filter.id === 'category')?.value as string[],
+      method: columnFilters.find(filter => filter.id === 'method')?.value as string[],
+    });
+
+  }
+
+  
+
   return <div className='flex flex-col gap-4'>
     
     <div className="flex justify-between items-center ">
       <div className="flex gap-2">
+        <PaymentTypeSelector options={filters?.payment_types} onValueChange={handlePaymentTypeChange} value={filter.type} />
         <MonthSelector onValueChange={handleMonthChange} value={filter.months} />
         <Select value={filter.year} onValueChange={handleYearChange}>
           <SelectTrigger className="w-[180px]">
@@ -125,6 +193,15 @@ function RouteComponent() {
       <Button>Add Payment</Button>
       
     </div>
-    <PaymentTable isPending={isPending} data={data} />
+    <DataTable 
+      filters={filters} 
+      columns={columns} 
+      data={data?.data ?? []} 
+      onTableChange={handleTableChange}
+      renderFooter={(table) => <PaymentFooter 
+        table={table as Table<Payment>} 
+        colspan={4}
+      />}
+     />
   </div>
 }

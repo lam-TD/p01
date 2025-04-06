@@ -15,10 +15,11 @@ class DatabaseSeeder extends Seeder
         // Seed in the correct order to respect dependencies
         $this->call([
             
-            // Then seed users (required for payments)
+            // User
             UserSeeder::class,
             
-            // Then seed payment-related data
+            // Dữ liệu thu chi
+            PaymentTypeSeeder::class,
             PaymentCategorySeeder::class,
             PaymentMethodSeeder::class,
             PaymentSeeder::class,

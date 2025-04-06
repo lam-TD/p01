@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class PaymentMethod extends Model
+class PaymentType extends Model
 {
     use HasFactory;
 
@@ -17,7 +17,6 @@ class PaymentMethod extends Model
      */
     protected $fillable = [
         'name',
-        'description',
         'color',
         'icon',
         'is_active',
@@ -33,10 +32,10 @@ class PaymentMethod extends Model
     ];
 
     /**
-     * Get the payments for the method.
+     * Get the categories for the payment type.
      */
-    public function payments(): HasMany
+    public function categories(): HasMany
     {
-        return $this->hasMany(Payment::class);
+        return $this->hasMany(PaymentCategory::class);
     }
 }

@@ -8,9 +8,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useQuery } from "@tanstack/react-query"
+import { Badge } from "@/components/ui/badge"
 import dayjs from "dayjs"
-import { useState } from "react"
 
 
 const formatAmountWithoutCurrency = (amount: number) => {
@@ -21,7 +20,7 @@ const formatAmountWithoutCurrency = (amount: number) => {
 }
 
 const humanizeDate = (date: string) => {
-  return dayjs(date).format('DD/MM/YYYY HH:mm')
+  return dayjs(date).format('DD/MM/YYYY')
 }
 
 export function PaymentTable({ isPending, data }: { isPending: boolean, data: any }) {
@@ -32,13 +31,13 @@ export function PaymentTable({ isPending, data }: { isPending: boolean, data: an
 
   if (!data?.data) return <div>No data</div>
 
-  
   return (
     <Table>
       <TableCaption>A list of your recent invoices.</TableCaption>
       <TableHeader>
         <TableRow>
           <TableHead className="">Date time</TableHead>
+          <TableHead>Payment Type</TableHead>
           <TableHead>Category</TableHead>
           <TableHead>Method</TableHead>
           <TableHead className="text-right">Amount</TableHead>
@@ -48,7 +47,12 @@ export function PaymentTable({ isPending, data }: { isPending: boolean, data: an
         {data.data.map((payment: any) => (
           <TableRow key={payment.id}>
             <TableCell className="font-medium">{humanizeDate(payment.payment_date)}</TableCell>
-            <TableCell>{payment.category.name}</TableCell>
+            <TableCell>
+              <Badge variant="outline" style={{ color: payment.category.payment_type.color }}>{payment.category.payment_type.name}</Badge>
+            </TableCell>
+            <TableCell>
+              <Badge variant="outline" style={{ color: payment.category.color }}>{payment.category.name}</Badge>
+            </TableCell>
             <TableCell>{payment.method.name}</TableCell>
             <TableCell className="text-right">{formatAmountWithoutCurrency(payment.amount)}</TableCell>
           </TableRow>

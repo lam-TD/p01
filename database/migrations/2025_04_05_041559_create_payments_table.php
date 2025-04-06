@@ -18,7 +18,7 @@ return new class extends Migration
             $table->foreignId('payment_method_id')->constrained('payment_methods');
             $table->text('description')->nullable();
             $table->foreignId('user_id')->constrained('users');
-            $table->datetime('payment_date');
+            $table->date('payment_date');
             $table->timestamps();
         });
     }

@@ -13,11 +13,13 @@ return new class extends Migration
     {
         Schema::create('payment_categories', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
-            $table->enum('type', ['income', 'expense']);
-            $table->string('icon')->nullable();
+            $table->string('name')->unique();
             $table->text('description')->nullable();
+            $table->foreignId('payment_type_id')->constrained('payment_types');
+            $table->string('color')->nullable();
+            $table->string('icon')->nullable();
             $table->timestamps();
+            $table->boolean('is_active')->default(true);
         });
     }
 

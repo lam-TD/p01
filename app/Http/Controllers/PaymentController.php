@@ -8,27 +8,24 @@ use Illuminate\Support\Facades\DB;
 use Spatie\QueryBuilder\QueryBuilder;
 use Spatie\QueryBuilder\AllowedFilter;
 
-class PaymentController extends Controller
+class PaymentController extends ResourceController
 {
+    protected $defaultSort = ['-payment_date'];
+    protected $allowableSorts = ['amount', 'payment_date'];
+    protected $allowableIncludes = ['category.paymentType', 'method', 'user'];
+    protected $allowableFilterScopes = ['date', 'months', 'year', 'type', 'category', 'method', 'description'];
+
+    protected function model()
+    {
+        return Payment::class;
+    }
+
     /**
      * Display a listing of the resource.
      */
     public function index(Request $request)
     {
-        $year = $request->query('year');
-
-
-        $queryBuilder = QueryBuilder::for(Payment::class);
-        $queryBuilder->allowedIncludes(['category', 'method', 'user']);
-        $queryBuilder->allowedFilters([
-            AllowedFilter::scope('months'),
-            AllowedFilter::scope('year'),
-        ]);
-
-        // $payments = Payment::with('category', 'method', 'user')
-        // ->whereYear('payment_date', $year)
-        // ->whereRaw('extract(month from payment_date) in (' . implode(',', $months) . ')')
-        // ->get();
+        return parent::index($request);
 
         return response()->json([
             'message' => 'Hello, world!',
