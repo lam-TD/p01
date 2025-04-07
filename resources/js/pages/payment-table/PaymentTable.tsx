@@ -1,35 +1,24 @@
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import dayjs from "dayjs"
-
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCaption, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import dayjs from 'dayjs';
 
 const formatAmountWithoutCurrency = (amount: number) => {
   return new Intl.NumberFormat('vi-VN', {
     style: 'currency',
     currency: 'VND',
-  }).format(amount)
-}
+  }).format(amount);
+};
 
 const humanizeDate = (date: string) => {
-  return dayjs(date).format('DD/MM/YYYY')
-}
+  return dayjs(date).format('DD/MM/YYYY');
+};
 
-export function PaymentTable({ isPending, data }: { isPending: boolean, data: any }) {
-
-  if (isPending) return <div>Loading...</div>
+export function PaymentTable({ isPending, data }: { isPending: boolean; data: any }) {
+  if (isPending) return <div>Loading...</div>;
 
   const totalAmount = data.data.reduce((acc: number, payment: any) => acc + Number(payment.amount), 0);
 
-  if (!data?.data) return <div>No data</div>
+  if (!data?.data) return <div>No data</div>;
 
   return (
     <Table>
@@ -48,10 +37,14 @@ export function PaymentTable({ isPending, data }: { isPending: boolean, data: an
           <TableRow key={payment.id}>
             <TableCell className="font-medium">{humanizeDate(payment.payment_date)}</TableCell>
             <TableCell>
-              <Badge variant="outline" style={{ color: payment.category.payment_type.color }}>{payment.category.payment_type.name}</Badge>
+              <Badge variant="outline" style={{ color: payment.category.payment_type.color }}>
+                {payment.category.payment_type.name}
+              </Badge>
             </TableCell>
             <TableCell>
-              <Badge variant="outline" style={{ color: payment.category.color }}>{payment.category.name}</Badge>
+              <Badge variant="outline" style={{ color: payment.category.color }}>
+                {payment.category.name}
+              </Badge>
             </TableCell>
             <TableCell>{payment.method.name}</TableCell>
             <TableCell className="text-right">{formatAmountWithoutCurrency(payment.amount)}</TableCell>
@@ -65,5 +58,5 @@ export function PaymentTable({ isPending, data }: { isPending: boolean, data: an
         </TableRow>
       </TableFooter>
     </Table>
-  )
+  );
 }
