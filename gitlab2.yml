@@ -1,0 +1,167 @@
+stages:
+  - prepare
+  - lint
+  - static-analysis
+  - unit-tests
+  - feature-tests
+  - package
+
+default:
+  interruptible: true
+  cache:
+    key: "${CI_PROJECT_NAME}-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .composer-cache/
+      - .npm-cache/
+  variables:
+    COMPOSER_CACHE_DIR: "$CI_PROJECT_DIR/.composer-cache"
+    NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.npm-cache"
+    APP_ENV: testing
+    APP_DEBUG: "true"
+    QUEUE_CONNECTION: sync
+    MAIL_MAILER: log
+    CACHE_DRIVER: array
+    SESSION_DRIVER: array
+    PHP_MEMORY_LIMIT: 1024M
+
+# ---------- PREPARE ----------
+composer:install:
+  stage: prepare
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  script:
+    - cp .env.example .env
+    - php -r "file_exists('.env') || copy('.env.example', '.env');"
+    - php artisan key:generate
+    - composer validate --strict
+    - composer install --prefer-dist --no-progress --no-interaction --no-scripts
+    - composer audit --no-interaction --locked || true   # cảnh báo bảo mật (không fail sớm)
+  artifacts:
+    paths: [vendor/]
+    expire_in: 1 week
+
+npm:ci:
+  stage: prepare
+  image: node:20
+  script:
+    - npm ci
+  artifacts:
+    paths: [node_modules/.cache]  # chỉ cache build cache, không cần full node_modules
+    expire_in: 1 week
+
+# ---------- LINT ----------
+pint:
+  stage: lint
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  needs: ["composer:install"]
+  script:
+    - vendor/bin/pint --test
+  allow_failure: false
+
+eslint:
+  stage: lint
+  image: node:20
+  needs: ["npm:ci"]
+  script:
+    - npx eslint resources/js --max-warnings=0
+  rules:
+    - exists:
+        - resources/js/**/*
+
+# ---------- STATIC ANALYSIS ----------
+phpstan:
+  stage: static-analysis
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  needs: ["composer:install"]
+  script:
+    - mkdir -p var/phpstan
+    - vendor/bin/phpstan analyse --error-format=junit > phpstan-junit.xml || export PHPSTAN_EXIT=$?
+    - vendor/bin/phpstan analyse --no-progress --memory-limit=1G || export PHPSTAN_EXIT=$?
+    - exit ${PHPSTAN_EXIT:-0}
+  artifacts:
+    when: always
+    reports:
+      junit: phpstan-junit.xml
+    expire_in: 1 week
+
+phpinsights:
+  stage: static-analysis
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  needs: ["composer:install"]
+  script:
+    - vendor/bin/phpinsights -N --min-quality=75 --min-complexity=60 --min-architecture=75 --min-style=75
+    - vendor/bin/phpinsights -N --format=json > phpinsights.json || true
+  artifacts:
+    when: always
+    paths: [phpinsights.json]
+    expire_in: 1 week
+
+# ---------- UNIT TESTS ----------
+unit:sqlite:
+  stage: unit-tests
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  needs: ["composer:install"]
+  variables:
+    DB_CONNECTION: sqlite
+    DB_DATABASE: ":memory:"
+  script:
+    - php artisan config:clear
+    - php artisan test --testsuite=Unit --parallel --log-junit=junit-unit.xml
+  artifacts:
+    when: always
+    reports:
+      junit: junit-unit.xml
+    expire_in: 1 week
+
+# ---------- FEATURE TESTS ----------
+feature:pgsql:
+  stage: feature-tests
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  needs: ["composer:install"]
+  services:
+    - name: postgres:16-alpine
+      alias: pg
+  variables:
+    DB_CONNECTION: pgsql
+    DB_HOST: pg
+    DB_PORT: 5432
+    DB_DATABASE: testing
+    DB_USERNAME: postgres
+    DB_PASSWORD: postgres
+    # chờ DB sẵn sàng
+    PGPASSWORD: postgres
+  script:
+    - until pg_isready -h "$DB_HOST" -p "$DB_PORT"; do echo "waiting for db..."; sleep 1; done
+    - php artisan migrate:fresh --seed --force
+    - php artisan test --testsuite=Feature --log-junit=junit-feature.xml --coverage-clover=coverage.xml
+  artifacts:
+    when: always
+    reports:
+      junit: junit-feature.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    expire_in: 1 week
+
+# ---------- PACKAGE (vite build) ----------
+vite:build:
+  stage: package
+  image: node:20
+  needs: ["npm:ci", "feature:pgsql"]
+  script:
+    - npm run build
+  artifacts:
+    paths:
+      - public/build/
+    expire_in: 1 week
+  rules:
+    - exists:
+        - vite.config.* 
+        - resources/**/*
+
+# ---------- RULES FOR MR vs. branch ----------
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+    - if: $CI_COMMIT_BRANCH
+      when: always
