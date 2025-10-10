@@ -1,0 +1,64 @@
+stages:
+  - prepare
+  - static-analysis
+
+variables:
+  COMPOSER_CACHE_DIR: "$CI_PROJECT_DIR/.composer-cache"
+
+cache:
+  key: "composer-${CI_COMMIT_REF_SLUG}"
+  paths:
+    - vendor/
+    - .composer-cache/
+
+# Cài deps 1 lần, cache lại cho các job sau
+composer:install:
+  stage: prepare
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  script:
+    - composer install --prefer-dist --no-interaction --no-progress
+  artifacts:
+    paths:
+      - vendor/
+    expire_in: 1 week
+
+phpstan:
+  stage: static-analysis
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  needs: ["composer:install"]
+  script:
+    - mkdir -p var/phpstan
+    # Xuất JUnit để hiện trong “Unit test report” widget
+    - vendor/bin/phpstan analyse --no-progress --error-format=junit > phpstan-junit.xml || export PHPSTAN_EXIT=$?
+    # In ra bảng dễ đọc trong log
+    - vendor/bin/phpstan analyse --no-progress --memory-limit=1G || export PHPSTAN_EXIT=$?
+    - exit ${PHPSTAN_EXIT:-0}
+  artifacts:
+    when: always
+    reports:
+      junit: phpstan-junit.xml
+    paths:
+      - phpstan-junit.xml
+  allow_failure: false
+  only:
+    - merge_requests
+    - branches
+
+phpinsights:
+  stage: static-analysis
+  image: edbizarro/gitlab-ci-pipeline-php:8.3
+  needs: ["composer:install"]
+  script:
+    # Fail nếu dưới ngưỡng trong phpinsights.php
+    - vendor/bin/phpinsights --no-interaction --min-quality=85 --min-complexity=70 --min-architecture=85 --min-style=85 -n
+    # (tùy chọn) Xuất JSON để lưu artifacts/so sánh về sau
+    - vendor/bin/phpinsights -N --format=json > phpinsights.json || true
+  artifacts:
+    when: always
+    paths:
+      - phpinsights.json
+    expire_in: 1 week
+  allow_failure: false
+  only:
+    - merge_requests
+    - branches
