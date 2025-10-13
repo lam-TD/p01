@@ -1,0 +1,153 @@
+stages:
+  - prepare
+  - frontend
+  - test
+  - quality
+  # - deploy    # nếu cần, bật lên và thêm job bên dưới
+
+default:
+  image: php:8.2-cli-bullseye
+  cache:
+    key:
+      files:
+        - composer.lock
+        - package-lock.json
+    paths:
+      - vendor/
+      - node_modules/
+      - .cache/composer
+      - .cache/npm
+  before_script:
+    - apt-get update -y
+    - apt-get install -y --no-install-recommends git unzip libpq-dev libzip-dev libicu-dev libonig-dev libxml2-dev libpng-dev postgresql-client
+    - docker-php-ext-configure intl
+    - docker-php-ext-install -j"$(nproc)" intl bcmath pcntl zip pdo_pgsql pgsql
+    - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    - mkdir -p .cache/composer .cache/npm storage/test-results
+  variables:
+    APP_ENV: testing
+    CACHE_DRIVER: file
+    SESSION_DRIVER: file
+    QUEUE_CONNECTION: sync
+    COMPOSER_CACHE_DIR: ".cache/composer"
+    NPM_CONFIG_CACHE: ".cache/npm"
+    # Nếu bạn dùng Redis/Queue khác thì override tại job
+
+# ---------- PREPARE ----------
+prepare:composer:
+  stage: prepare
+  script:
+    - composer install --no-interaction --prefer-dist --no-progress
+    - |
+      if [ ! -f .env.testing ]; then
+        cp .env.example .env.testing
+      fi
+  artifacts:
+    paths:
+      - vendor/
+      - .env.testing
+    expire_in: 1h
+
+# ---------- FRONTEND (Vite) ----------
+frontend:build:
+  stage: frontend
+  image: node:20-bullseye
+  needs: ["prepare:composer"]
+  before_script:
+    - mkdir -p .cache/npm
+  script:
+    - [ -f package-lock.json ] && npm ci || npm i
+    - npm run build
+  artifacts:
+    paths:
+      - public/build/
+    expire_in: 1h
+
+# ---------- TEST + PostgreSQL service ----------
+test:php:
+  stage: test
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+  variables:
+    POSTGRES_DB: laravel_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DB_CONNECTION: pgsql
+    DB_HOST: postgres
+    DB_PORT: "5432"
+    DB_DATABASE: laravel_test
+    DB_USERNAME: postgres
+    DB_PASSWORD: postgres
+    PHP_CS_FIXER_IGNORE_ENV: 1
+  needs:
+    - job: prepare:composer
+      artifacts: true
+    - job: frontend:build
+      artifacts: true
+  script:
+    # Chờ Postgres sẵn sàng
+    - until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USERNAME"; do echo "waiting for postgres..."; sleep 1; done
+    # ENV testing
+    - cp .env.testing .env
+    - php artisan key:generate --force
+    - php artisan config:clear
+    - php artisan migrate:fresh --force
+    # (tùy chọn) seed: php artisan db:seed --force
+    # Test (Pest ưu tiên, fallback sang PHPUnit)
+    - |
+      if [ -f vendor/bin/pest ]; then
+        vendor/bin/pest --colors=always --log-junit=storage/test-results/junit.xml
+      else
+        vendor/bin/phpunit --colors=always --log-junit storage/test-results/junit.xml
+      fi
+  artifacts:
+    when: always
+    reports:
+      junit: storage/test-results/junit.xml
+    paths:
+      - storage/logs/
+      - storage/test-results/
+      - coverage/            # nếu bạn bật coverage
+    expire_in: 1 week
+
+# ---------- QUALITY (Larastan + Pint) ----------
+quality:php:
+  stage: quality
+  needs: ["prepare:composer"]
+  script:
+    - |
+      if [ -f vendor/bin/phpstan ]; then
+        vendor/bin/phpstan analyse --no-progress
+      else
+        echo "Missing phpstan. Add phpstan/phpstan (and nunomaduro/larastan) to require-dev."; exit 1
+      fi
+    - |
+      if [ -f vendor/bin/pint ]; then
+        vendor/bin/pint --test
+      else
+        echo "Missing laravel/pint. Add to require-dev."; exit 1
+      fi
+
+# ---------- (Tuỳ chọn) DEPLOY qua SSH không cần registry ----------
+# deploy:prod:
+#   stage: deploy
+#   image: alpine:3.20
+#   needs: ["test:php", "quality:php", "frontend:build"]
+#   before_script:
+#     - apk add --no-cache openssh-client rsync
+#     # load private key từ CI/CD variable: SSH_PRIVATE_KEY
+#     - mkdir -p ~/.ssh
+#     - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - >/dev/null 2>&1 || (eval `ssh-agent -s`; echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -)
+#     - chmod 700 ~/.ssh
+#     - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+#   script:
+#     # Ví dụ rsync code đã build đến host
+#     - rsync -az --delete --exclude=".git" --exclude="node_modules" --exclude="tests" ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH"
+#     # Chạy migrate trên server (tuỳ hạ tầng của bạn)
+#     - ssh "$DEPLOY_USER@$DEPLOY_HOST" "cd $DEPLOY_PATH && php artisan migrate --force"
+#   environment:
+#     name: production
+#     url: https://yourdomain.tld
+#   only:
+#     - main
