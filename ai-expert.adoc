@@ -1,51 +1,170 @@
-Goal	Trợ lý tài liệu	
-Tiêu chí đánh giá dự án thành công	Tìm chính xác	
-	Tóm tắt	
-	Hướng dẫn dựa theo tài liệu	
-	Kèm tài liệu	
-	Hỗ trợ đã ngôn ngữ: VN, JP, EN	
-Tài liệu dự án		
-Giới thiệu & Thuật ngữ		
-		
-Phạm vi hệ thống & Ràng buộc (legal, compliance, browser, OS, data residency…)		
-Legal		
-OS	Ubuntu 24.04 LTS	MIn: 4 core, RAM 8GB, SSD: 20GB
-Container	Docker image	
-		
-		
-Mô hình tổng quan: context diagram, boundary		
-		
-Yêu cầu chức năng (FR): theo module/use case; mỗi FR phải testable		
-Phân quyền	theo license	
-Function requirement		
-api	tenants	Mỗi tenant là 1 csdl
-	tenants/upload	"- Chỉ lưu vector, file sẽ bị xóa sau khi quá trình hoàn tất
-- Ko hỗ trợ kiểm tra trùng, bên thứ ba sẽ tự xử lý"
-	documents	CRUD documents
-	chat	"Theo nhiều điều kiện:
+= PRD/SRS – Trợ lý tài liệu
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+
+== Goal
+Trợ lý tài liệu
+
+== Tiêu chí đánh giá dự án thành công
+- Tìm chính xác
+- Tóm tắt
+- Hướng dẫn dựa theo tài liệu
+- Kèm tài liệu
+- Hỗ trợ đã ngôn ngữ: VN, JP, EN
+
+== Tài liệu dự án
+=== Giới thiệu & Thuật ngữ
+// Điền định nghĩa thuật ngữ, viết tắt, phạm vi thuật ngữ.
+
+== Phạm vi hệ thống & Ràng buộc
+Những ràng buộc về legal, compliance, browser, OS, data residency…
+
+=== Legal
+// TBD
+
+=== OS / Hạ tầng
+[cols="1,3"]
+|===
+|Thành phần | Yêu cầu
+
+|OS
+|Ubuntu 24.04 LTS
+
+|Tối thiểu phần cứng
+|4 core CPU, RAM 8GB, SSD 20GB
+|===
+
+=== Container
+- Docker image
+
+== Mô hình tổng quan
+- Context diagram, boundary (TBD).
+
+== Yêu cầu chức năng (FR)
+Mỗi FR phải testable.
+
+=== Phân quyền
+- Theo license
+
+=== Function Requirement (APIs)
+[cols="1,2,3", options="header"]
+|===
+|Endpoint |Mô tả |Ghi chú
+
+|`/api/tenants`
+|Mỗi tenant là 1 cơ sở dữ liệu
+|
+
+|`/api/tenants/upload`
+|Quy trình upload
+|a|
+- Chỉ lưu vector, file sẽ bị xóa sau khi quá trình hoàn tất
+- Ko hỗ trợ kiểm tra trùng, bên thứ ba sẽ tự xử lý
+
+|`/api/documents`
+|CRUD documents
+|
+
+|`/api/chat`
+|Chat theo nhiều điều kiện
+|a|
 - Theo tenant
-- Tài liệu: document_id
-- Theo metadata"
-	settings	- Temparture
-csdl	pgvector, qdrant	
-Phân loại câu hỏi	Chỉ hỗ trợ 1 số loại câu hỏi nhất định	Tùy embedding models
-Tài liệu hỗ trợ	pdf, txt	Tikapache
-Hỗ trợ nhiều LLMs		User có thể chọn model trả lời
-Log	Level: INFO, ERROR	Log rolling max 10MB
-Monitor	opentelemetry	
-	audit	
-		
-Yêu cầu phi chức năng (NFR): hiệu năng, bảo mật, tính sẵn sàng, backup/DR, audit, i18n, accessibility… (định lượng)		
-Bảo mật	Basic auth	license key
-Hiệu năng	Upload	Max: default 10MB
-	RAM	Usage RAM 6GB
-	Concurrency	50 request trên giây
-Hỗ trợ 3 ngôn ngữ	Hỗ trợ đã ngôn ngữ: VN, JP, EN	
-Accessibility	Theo license key	
-Quản lý phiên bản	Mỗi version là 1 docker image	
-		
-Dữ liệu & Tích hợp: ERD, data dictionary, API contracts, message schemas, migration/retention		
-Docs	Dành cho dev	
-	Mô tả chức năng	
-OpenAPI		
-Testing	Unit test, Intergation test	
+- Theo tài liệu: `document_id`
+- Theo `metadata`
+
+|`/api/settings`
+|Cấu hình
+|a|
+- Temparture
+|===
+
+=== CSDL / Vector Stores
+- `pgvector`, `qdrant`
+
+=== Phân loại câu hỏi
+- Chỉ hỗ trợ 1 số loại câu hỏi nhất định
+- Tùy embedding models
+
+=== Tài liệu hỗ trợ
+[cols="1,3"]
+|===
+|Định dạng | Ghi chú
+
+|`pdf`, `txt`
+|Tikapache
+|===
+
+=== Hỗ trợ nhiều LLMs
+- User có thể chọn model trả lời
+
+=== Log
+[cols="1,3"]
+|===
+|Thuộc tính | Giá trị
+
+|Level
+|INFO, ERROR
+
+|Log rolling
+|Tối đa 10MB / file
+|===
+
+=== Monitor & Audit
+- Monitoring: OpenTelemetry
+- Audit: (TBD)
+
+== Yêu cầu phi chức năng (NFR)
+Hiệu năng, bảo mật, tính sẵn sàng, backup/DR, audit, i18n, accessibility… (định lượng khi có thể).
+
+[cols="1,2,3", options="header"]
+|===
+|Nhóm |Mục |Chỉ tiêu / Ghi chú
+
+|Bảo mật
+|Cơ chế xác thực
+|Basic auth
+
+|Bảo mật
+|License
+|license key
+
+|Hiệu năng
+|Upload
+|Max: default 10MB
+
+|Hiệu năng
+|RAM
+|Usage RAM 6GB
+
+|Hiệu năng
+|Concurrency
+|50 request trên giây
+
+|Quốc tế hóa (i18n)
+|Ngôn ngữ
+|Hỗ trợ đã ngôn ngữ: VN, JP, EN
+
+|Accessibility
+|Phân quyền truy cập
+|Theo license key
+
+|Quản lý phiên bản
+|Phát hành
+|Mỗi version là 1 docker image
+|===
+
+== Dữ liệu & Tích hợp
+Bao gồm ERD, data dictionary, API contracts, message schemas, migration/retention.
+
+=== Docs
+- Dành cho dev
+- Mô tả chức năng
+
+=== OpenAPI
+- Cung cấp hợp đồng API (OpenAPI)
+
+=== Testing
+- Unit test
+- Intergation test
