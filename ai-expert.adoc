@@ -1,0 +1,51 @@
+Goal	Trợ lý tài liệu	
+Tiêu chí đánh giá dự án thành công	Tìm chính xác	
+	Tóm tắt	
+	Hướng dẫn dựa theo tài liệu	
+	Kèm tài liệu	
+	Hỗ trợ đã ngôn ngữ: VN, JP, EN	
+Tài liệu dự án		
+Giới thiệu & Thuật ngữ		
+		
+Phạm vi hệ thống & Ràng buộc (legal, compliance, browser, OS, data residency…)		
+Legal		
+OS	Ubuntu 24.04 LTS	MIn: 4 core, RAM 8GB, SSD: 20GB
+Container	Docker image	
+		
+		
+Mô hình tổng quan: context diagram, boundary		
+		
+Yêu cầu chức năng (FR): theo module/use case; mỗi FR phải testable		
+Phân quyền	theo license	
+Function requirement		
+api	tenants	Mỗi tenant là 1 csdl
+	tenants/upload	"- Chỉ lưu vector, file sẽ bị xóa sau khi quá trình hoàn tất
+- Ko hỗ trợ kiểm tra trùng, bên thứ ba sẽ tự xử lý"
+	documents	CRUD documents
+	chat	"Theo nhiều điều kiện:
+- Theo tenant
+- Tài liệu: document_id
+- Theo metadata"
+	settings	- Temparture
+csdl	pgvector, qdrant	
+Phân loại câu hỏi	Chỉ hỗ trợ 1 số loại câu hỏi nhất định	Tùy embedding models
+Tài liệu hỗ trợ	pdf, txt	Tikapache
+Hỗ trợ nhiều LLMs		User có thể chọn model trả lời
+Log	Level: INFO, ERROR	Log rolling max 10MB
+Monitor	opentelemetry	
+	audit	
+		
+Yêu cầu phi chức năng (NFR): hiệu năng, bảo mật, tính sẵn sàng, backup/DR, audit, i18n, accessibility… (định lượng)		
+Bảo mật	Basic auth	license key
+Hiệu năng	Upload	Max: default 10MB
+	RAM	Usage RAM 6GB
+	Concurrency	50 request trên giây
+Hỗ trợ 3 ngôn ngữ	Hỗ trợ đã ngôn ngữ: VN, JP, EN	
+Accessibility	Theo license key	
+Quản lý phiên bản	Mỗi version là 1 docker image	
+		
+Dữ liệu & Tích hợp: ERD, data dictionary, API contracts, message schemas, migration/retention		
+Docs	Dành cho dev	
+	Mô tả chức năng	
+OpenAPI		
+Testing	Unit test, Intergation test	
