@@ -1,0 +1,58 @@
+# PHP 8.3 + Apache
+FROM php:8.3-apache
+
+# ===== System deps =====
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends \
+      git unzip zip curl ca-certificates supervisor \
+      libpq-dev libzip-dev libicu-dev libonig-dev libxml2-dev libpng-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# ===== PHP extensions =====
+RUN docker-php-ext-configure intl \
+ && docker-php-ext-install -j"$(nproc)" intl bcmath pcntl zip pdo_pgsql
+
+# ===== Apache setup =====
+# DocumentRoot -> /var/www/html/public, enable rewrite & headers
+RUN a2enmod rewrite headers \
+ && sed -ri -e 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf \
+ && sed -ri -e 's!/var/www/!/var/www/html/public!g' /etc/apache2/apache2.conf \
+ && printf "\n<Directory /var/www/html/public>\n\tAllowOverride All\n</Directory>\n" >> /etc/apache2/apache2.conf
+
+# (Tuỳ chọn) Vhost sạch hơn kèm health endpoint
+COPY deploy/apache/000-default.conf /etc/apache2/sites-available/000-default.conf
+
+# ===== PHP ini =====
+RUN echo "memory_limit=1024M" > /usr/local/etc/php/conf.d/zz-memory.ini \
+ && echo "opcache.enable=1\nopcache.enable_cli=1\nopcache.jit=tracing\nopcache.jit_buffer_size=64M" > /usr/local/etc/php/conf.d/opcache.ini
+
+# ===== Composer =====
+RUN curl -sS https://getcomposer.org/installer \
+    | php -- --install-dir=/usr/local/bin --filename=composer \
+ && composer --version
+
+WORKDIR /var/www/html
+
+# ===== App code =====
+# (Build mỗi release trên server; CI rsync code → docker compose build)
+COPY . /var/www/html
+
+# Cài vendor (staging: no-dev). Nếu vendor đã có trong code, bạn có thể bỏ bước này.
+RUN composer install --no-dev --prefer-dist --no-interaction --no-progress \
+ || true
+
+# ===== Supervisor (worker & scheduler) =====
+COPY deploy/supervisor/supervisord.conf /etc/supervisor/supervisord.conf
+COPY deploy/supervisor/laravel.conf /etc/supervisor/conf.d/laravel.conf
+
+# Quyền ghi cho storage/bootstrap/cache
+RUN chown -R www-data:www-data /var/www/html \
+ && mkdir -p storage bootstrap/cache \
+ && chown -R www-data:www-data storage bootstrap/cache
+
+# Expose Apache
+EXPOSE 80
+
+# Mặc định container này chạy Apache (web).
+# Container "worker" sẽ override CMD để chạy supervisord.
+CMD ["apache2-foreground"]
