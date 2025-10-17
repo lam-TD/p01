@@ -1,0 +1,62 @@
+version: "3.9"
+
+name: myapp-staging
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.staging
+    container_name: myapp_stg_web
+    env_file: .env
+    ports:
+      - "8080:80"              # đổi cổng nếu cần
+    depends_on:
+      - pg
+    volumes:
+      # Persist storage (logs, uploads). Giữ dữ liệu khi rebuild container
+      - app_storage:/var/www/html/storage
+      # (tuỳ chọn) nếu bạn cần dump hay share cache:
+      # - app_cache:/var/www/html/bootstrap/cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.staging
+    container_name: myapp_stg_worker
+    env_file: .env
+    depends_on:
+      - pg
+    volumes:
+      - app_storage:/var/www/html/storage
+    command: [ "supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf" ]
+    restart: unless-stopped
+
+  pg:
+    image: postgres:16-alpine
+    container_name: myapp_stg_pg
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-myapp_stg}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    volumes:
+      - pgdata_staging:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-myapp_stg} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata_staging:
+  app_storage:
+  # app_cache:
