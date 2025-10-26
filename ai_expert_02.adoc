@@ -1,0 +1,240 @@
+= PRD – RAG REST API (MVP, FastAPI delivery)
+:owner: Joyce (PO)
+:status: Draft – MVP REST (FastAPI)
+:last-updated: 2025-10-26
+
+[NOTE]
+====
+This PRD pivots the MVP from a pure SDK to **RESTful APIs** delivered with **FastAPI (Python)**. Scope remains simplified:
+- **No ACL/permissions**, **no external connectors** (OneDrive/SharePoint), **no multi-tenant**.
+- Departments **manually prepare & provide** files for ingest.
+- Focus on: manual **ingest**, **Q&A with citations**, **basic summarization**, **keyword search**.
+====
+
+== 1. Problem Statement (as locked in Step 1)
+Doanh nghiệp của chúng tôi đang quản lý khoảng 10,000 tài liệu, tăng 10%/tháng, phân tán ở OneDrive, SharePoint và trải rộng nhiều định dạng PDF, DOCX, XLSX, PPTX, TXT, AsciiDoc; phân bố ngôn ngữ vi 20% / en 40% / jp 40%.
+
+Các nhóm Development, Sales gặp khó khăn trong việc tổ chức và truy xuất nhanh, chính xác, có trích dẫn nguồn do: phân tán, đa ngôn ngữ, quyền truy cập phức tạp, chất lượng dữ liệu không đồng nhất.
+
+Hiện tại, thời gian P95 để tìm đúng thông tin là > 10 phút; tỷ lệ trả lời sai ~30% và thiếu trích dẫn ~10%; phát sinh ~10 yêu cầu hỗ trợ mỗi tuần. Các sự cố về quyền truy cập/tuân thủ xảy ra > 10 lần/tháng, dẫn đến chậm ký hợp đồng, chậm phản hồi khách hàng, tăng rủi ro không tuân thủ, ảnh hưởng trực tiếp đến hiệu suất làm việc và sự hài lòng của khách hàng.
+
+== 2. Direction Update (MVP REST)
+* **Delivery interface:** RESTful HTTP API (FastAPI); auto-generated **OpenAPI** docs.
+* **Reasoning:** dễ tích hợp đa nền tảng; chuẩn hóa hợp đồng; thuận lợi cho versioning & gateway.
+* **Out of scope (MVP):** ACL/permissions, audit, multi-tenant; external connectors (OneDrive/SharePoint); “latest resolver” tự động; streaming.
+
+== 3. Personas (MVP)
+* **Sales Representative (Primary)** — Hỏi–đáp nhanh bằng tiếng Việt, nhận câu trả lời + 3–5 citations bấm được. Chấp nhận phòng ban đã chuẩn hoá phiên bản trước khi ingest.
+* **Developer Integrator (Primary)** — Gọi REST APIs để ingest file do phòng ban cung cấp, tích hợp Q&A/search/summary vào ứng dụng hiện có, theo dõi lỗi parse & thống kê tối thiểu.
+
+== 4. Goals / KPI (MVP, unchanged from SDK variant)
+* **P95 latency (Q&A)**: ≤ **5s**; **P99**: ≤ **8s**.
+* **Citation validity**: ≥ **95%**; **Hallucination rate**: ≤ **3%** (offline eval nhỏ).
+* **Ingest throughput**: ≥ **100 trang/phút/node** (mix PDF/DOCX).
+* **Time-to-First-Answer (DX)**: ≤ **30 phút** cho Hello-World.
+* **Duplicate ingest rate**: ≤ **0.1%** (idempotency theo `content_hash + filename`).
+
+== 5. Scope – MoSCoW (MVP REST)
+=== MUST
+* **Endpoints**: `/sources`, `/sources/{source_id}/documents`, `/documents`, `/documents/{id}`, `/query`, `/source/documents/{id}/summary`, `sources/{source_id}/search`, `/healthz`.
+* **Envelope** phản hồi: `{success, data, meta, errors}` (chuẩn lỗi: `OK, INVALID_INPUT, NOT_FOUND, AMBIGUOUS, NO_CITATION, INTERNAL_ERROR`).
+* Ingest **multipart/form-data**; metadata tối thiểu `{ document_id, token_count }`.
+* Q&A có **3–5 citations**; keyword search đơn giản; summarization theo document.
+* **OpenAPI docs** sẵn (FastAPI), mô tả schemas & responses.
+* Chunking **512–1024 tokens**, overlap **10–15%**; embeddings đa ngôn ngữ.
+* KPI: **P95 Q&A ≤ 5s**; **Embedding ≥ 100 trang/phút/node**.
+* Session chat: lưu 5 câu hỏi gần nhất (optional, lưu trong Redis).
+* Monitor: optional.
+
+=== SHOULD
+* Idempotency (`allowDuplicates=false` mặc định), dedupe theo `content_hash + filename`.
+* Thống kê tối thiểu (`meta.stats`): số tài liệu, số nguồn (`sourceId`), lần index gần nhất.
+* Validation cỡ file & loại file; thông báo lỗi parse per-item.
+* Không lưu trữ lịch sử truy vấn (MVP).
+
+=== COULD
+* **API Key** đơn giản (header) để khóa nội bộ.
+* Cache kết quả truy vấn (không có ACL nên cache đơn giản).
+* CLI ingest nhẹ; UI demo.
+* SDK thin client (auto-gen từ OpenAPI) cho TS/Python.
+
+=== WON’T (MVP)
+* ACL/permissions, audit, multi-tenant.
+* Connectors OneDrive/SharePoint/Confluence/GDrive.
+* “Latest resolver” tự động.
+* Streaming bắt buộc.
+* Fine-tuning LLM; UI quản trị phức tạp.
+
+== 6. Functional Requirements (REST)
+
+[.lead]
+Mọi endpoint trả về theo envelope chuẩn. Các AC (Acceptance Criteria) gắn với KPI/NFR ở trên.
+
+=== 6.1 Common (COM)
+*FR-COM-001 – Envelope & Codes*
+- Response JSON: `{ success, code, data, meta, errors }`.
+- Codes: `OK`, `INVALID_INPUT`, `NOT_FOUND`, `AMBIGUOUS`, `NO_CITATION`, `INTERNAL_ERROR`.
+*AC*: `success=false` ⇒ `data=null`, `errors` != null.
+
+*FR-COM-002 – OpenAPI & Tags*
+- Tài liệu OpenAPI hiển thị đầy đủ paths, schemas, responses; gán `tags` cho nhóm chức năng.
+*AC*: /docs hoặc /openapi.json luôn phản ánh phiên bản mới nhất.
+
+*FR-COM-003 – Validation cơ bản*
+- Giới hạn kích thước file (config), định dạng hỗ trợ (PDF/DOCX/XLSX/PPTX/TXT/ADoc).
+- Lỗi parse cấp per-file, không làm hỏng toàn batch.
+*AC*: Batch ingest có file hỏng vẫn trả kết quả phần hợp lệ.
+
+=== 6.2 Sources
+*FR-SRC-001 – Tạo nguồn*
+- `POST /sources` (body: `{source_id, description?}`), `source_id` regex `^[a-z0-9\-_\.]{3,64}$` (unique).
+*AC*: Tạo nguồn mới; trùng `source_id` ⇒ `INVALID_INPUT`.
+
+*FR-SRC-002 – Liệt kê nguồn*
+- `GET /sources` với `meta.count`.
+*AC*: Trả danh sách nguồn theo thời gian tạo.
+
+=== 6.3 Documents (Ingest & CRUD nhẹ)
+*FR-DOC-001 – Ingest nhiều file*
+- `POST /sources/{source_id}/documents` (multipart): nhiều `files=`, `metadata` (JSON string).
+- Lưu trữ kèm `content_hash` để dedupe.
+*AC*: Trả `documentIds[]` cho phần thành công; lỗi per-item chi tiết.
+
+*FR-DOC-002 – Danh sách tài liệu & lọc*
+- `GET /documents?source_id=&department=&tags=tag1,tag2`.
+*AC*: Lọc chính xác theo các tham số; `meta.count` trả tổng sau lọc.
+
+*FR-DOC-003 – Tra cứu chi tiết*
+- `GET /documents/{document_id}`.
+*AC*: `NOT_FOUND` nếu không tồn tại.
+
+*FR-DOC-004 – Xoá tài liệu (tuỳ chọn MVP)*
+- `DELETE /documents/{document_id}`.
+*AC*: Xoá an toàn; `NOT_FOUND` nếu id không có.
+
+=== 6.4 Q&A (Citations)
+*FR-QA-001 – Hỏi–đáp*
+- `POST /query` body: `{ query, source_ids?, filters?, top_k?, answer_language? }`.
+- **Cross-lingual**: câu hỏi VI, nguồn en/jp vẫn trả lời VI.
+*AC*: Trả `{ answer, citations[] }` (3–5 citations nếu có). Không có citation ⇒ `NO_CITATION`.
+
+*FR-QA-002 – Định dạng citations*
+- `{ docId, sourceId, title?, locator:{ page?, chunkId? }, snippet, score }`.
+*AC*: `snippet` khớp đoạn; `score` > ngưỡng tối thiểu (config).
+
+*FR-QA-003 – Hiệu năng*
+- P95 **≤ 5s**, P99 **≤ 8s** (100 truy vấn hỗn hợp).
+*AC*: Pass theo bộ test hiệu năng MVP.
+
+=== 6.5 Summarization
+*FR-SUM-001 – Tóm tắt theo document*
+- `POST /documents/{document_id}/summary` với `answer_language?`.
+*AC*: Trả 5–10 câu + dàn ý; không bịa ngoài tài liệu; `NOT_FOUND` nếu id sai.
+
+=== 6.6 Keyword Search
+*FR-KW-001 – Search*
+- `GET /search?q=&source_ids=csv` (BM25/keyword).
+*AC*: Trả danh sách tài liệu/đoạn; có `score` và `snippet` ngắn.
+
+== 7. API Contract (outline)
+
+[cols="2,2,3,5", options="header"]
+|===
+|Path |Method |Body (JSON / multipart) |Response (envelope)
+
+|/sources |POST |`{source_id, description?}` |`data: {source_id, description?, created_at}`
+|/sources |GET |— |`data: [ {source_id, description?, created_at} ], meta.count`
+|/sources/{source_id}/documents |POST |multipart: `files[]`, `metadata` (JSON string) |`data: [ {document_id, source_id, filename, content_hash, metadata, created_at} ], meta.count`
+|/documents |GET |— (`source_id?`, `department?`, `tags?`) |`data: [Document], meta.count`
+|/documents/{document_id} |GET |— |`data: Document`
+|/documents/{document_id} |DELETE |— |`data: {deleted: id}`
+|/query |POST |`{ query, source_ids?, filters?, top_k?, answer_language? }` |`data: { answer, citations[] }` hoặc `NO_CITATION`
+|/documents/{document_id}/summary |POST |`{ answer_language? }` |`data: { summary, outline[] }`
+|/search |GET |— (`q`, `source_ids?`) |`data: [ {document_id, source_id, filename, snippet?, score} ], meta.count`
+|/healthz |GET |— |`data: {status: "ok"}`
+|===
+
+**Envelope example (success)**
+[source,json]
+----
+{
+  "success": true,
+  "code": "OK",
+  "data": { "...": "..." },
+  "meta": { "count": 10 },
+  "errors": null
+}
+----
+
+**Envelope example (error)**
+[source,json]
+----
+{
+  "success": false,
+  "code": "INVALID_INPUT",
+  "data": null,
+  "meta": null,
+  "errors": [
+    { "message": "metadata must be JSON", "field": "metadata", "hint": "Pass a JSON string" }
+  ]
+}
+----
+
+== 8. Non-Functional Requirements (NFR)
+* **Performance:** Q&A P95 ≤ 5s; ingest throughput ≥ 100 trang/phút/node.
+* **Reliability:** batch ingest không hỏng toàn bộ khi có file lỗi; per-item errors.
+* **Security (MVP):** không ACL; triển khai trong mạng nội bộ. (Optional) API Key header.
+* **Observability:** log lỗi parse per-file; thống kê đơn giản (`meta.stats`).
+* **Compatibility:** multipart upload cho files; JSON cho các API còn lại.
+* **Documentation:** OpenAPI đầy đủ; examples cho mọi request/response.
+
+== 9. Risks & Mitigations
+* **Chất lượng nguồn** do phòng ban chịu trách nhiệm ⇒ cung cấp checklist import (định dạng, quy ước tên, version).
+* **Không có ACL** ⇒ chỉ dùng cho kho “chia sẻ chung” nội bộ; cảnh báo rõ trong tài liệu.
+* **Đa ngôn ngữ** ⇒ cần eval nhỏ 100 câu hỏi vi/en/jp để theo dõi citation validity.
+* **Hiệu năng** ⇒ tối ưu chunking, batch embeddings; cân nhắc cache query ở giai đoạn sau.
+
+== 10. Roadmap (Post-MVP)
+* **Connectors** OneDrive/SharePoint; **ACL/Audit** (Entra ID); **“latest resolver”** tự động; **streaming**; **multi-tenant**; **rate limiting** và **quota**; **SDK thin clients** auto-gen; **Java SDK**.
+
+
+
+Docker
+- Docker-compose.yml
+  - services
+    - app
+      - FastAPI app
+    - postgres
+      - PostgreSQL database
+    - redis
+      - Redis for caching and session management
+- python package management: uv
+- pyproject.toml
+  - dependencies
+    - fastapi
+    - uvicorn[standard]
+    - pydantic
+    - sqlalchemy
+    - alembic
+    - psycopg2-binary
+    - requests
+    - python-multipart
+    - pytest
+    - pytest-asyncio
+    - httpx
+  - dev-dependencies
+    - pre-commit
+    - black
+    - ruff
+    - coverage
+- style & quality
+ - black
+ - ruff
+- test
+    - pytest
+    - coverage
+    - unittest + httpx.AsyncClient
+    - Integration tests with test database (PostgreSQL) using docker-compose
+- CI/CD
+    - Gilance CI for linting, testing, coverage, build, push
+    - Docker Hub for image registry
