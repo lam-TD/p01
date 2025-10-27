@@ -1,0 +1,325 @@
+# =========================================================
+# GitLab CI for Laravel 12 + PHP 8.2 + PostgreSQL
+# - Uses local custom image: php-ci:8.2-bullseye (no registry)
+# - Caches vendor/node_modules; composer/npm cache
+# - Staging deploy via SSH + docker compose (no registry)
+# - Production deploy via SSH + rsync (releases + symlink)
+# =========================================================
+
+stages: [prepare, frontend, test, quality, deploy]
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+default:
+  image: php-ci:8.2-bullseye
+  pull_policy: if-not-present
+  cache:
+    key:
+      files: [composer.lock, package-lock.json]
+    paths:
+      - vendor/
+      - node_modules/
+      - .cache/composer
+      - .cache/npm
+  variables:
+    APP_ENV: testing
+    COMPOSER_CACHE_DIR: ".cache/composer"
+    NPM_CONFIG_CACHE: ".cache/npm"
+    COMPOSER_MEMORY_LIMIT: "-1"
+    # Bảo vệ host header khi test
+    APP_URL: "http://localhost"
+    SESSION_DOMAIN: "localhost"
+    SANCTUM_STATEFUL_DOMAINS: "localhost"
+
+# ---------- YAML anchors ----------
+.wait_pg_php: &wait_pg_php
+  - |
+    echo "waiting for postgres (${DB_HOST}:${DB_PORT}) ..."
+    until php -r '
+      $h=getenv("DB_HOST")?: "postgres";
+      $u=getenv("DB_USERNAME")?: "postgres";
+      $p=getenv("DB_PASSWORD")?: "postgres";
+      $d=getenv("DB_DATABASE")?: "laravel_test";
+      $port=getenv("DB_PORT")?: "5432";
+      $conn=@pg_connect("host=$h port=$port dbname=$d user=$u password=$p connect_timeout=2");
+      if($conn){echo "ok\n"; exit(0);} else {echo "wait\n"; exit(1);}
+    '; do sleep 1; done
+
+.ssh_ready: &ssh_ready
+  - apk add --no-cache openssh-client rsync bash
+  - eval $(ssh-agent -s)
+  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - >/dev/null
+  - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+# =========================================================
+# PREPARE: composer install 1 lần, phát hành artifacts vendor/.env.testing
+# =========================================================
+prepare:composer:
+  stage: prepare
+  script:
+    - mkdir -p .cache/composer .cache/npm storage/test-results
+    - composer install --no-interaction --prefer-dist --no-progress
+    - |
+      if [ ! -f .env.testing ]; then
+        cp .env.example .env.testing
+      fi
+    # đảm bảo host hợp lệ khi test
+    - sed -i 's|^APP_URL=.*$|APP_URL=http://localhost|' .env.testing || echo "APP_URL=http://localhost" >> .env.testing
+    - sed -i 's|^SESSION_DOMAIN=.*$|SESSION_DOMAIN=localhost|' .env.testing || echo "SESSION_DOMAIN=localhost" >> .env.testing
+    - sed -i 's|^SANCTUM_STATEFUL_DOMAINS=.*$|SANCTUM_STATEFUL_DOMAINS=localhost|' .env.testing || echo "SANCTUM_STATEFUL_DOMAINS=localhost" >> .env.testing
+  artifacts:
+    paths:
+      - vendor/
+      - .env.testing
+    expire_in: 2h
+
+# =========================================================
+# FRONTEND: build Vite (chỉ chạy khi có thay đổi)
+# =========================================================
+frontend:build:
+  stage: frontend
+  image: node:20-bullseye
+  needs: ["prepare:composer"]
+  script:
+    - mkdir -p .cache/npm
+    - '[ -f package-lock.json ] && npm ci || npm i'
+    - npm run build
+  artifacts:
+    paths: [public/build/]
+    expire_in: 2h
+  rules:
+    - changes:
+        - package.json
+        - package-lock.json
+        - vite.config.*
+        - resources/**/*
+        - public/**/*
+    - when: manual
+      allow_failure: true
+
+# =========================================================
+# TEST: PHPUnit/Pest + PostgreSQL service
+# =========================================================
+test:php:
+  stage: test
+  needs:
+    - job: prepare:composer
+      artifacts: true
+    - job: frontend:build
+      optional: true
+      artifacts: true
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+      variables:
+        POSTGRES_DB: laravel_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+  variables:
+    DB_CONNECTION: pgsql
+    DB_HOST: postgres
+    DB_PORT: "5432"
+    DB_DATABASE: laravel_test
+    DB_USERNAME: postgres
+    DB_PASSWORD: postgres
+  script:
+    - cp .env.testing .env
+    - *wait_pg_php
+    - php artisan key:generate --force
+    - php artisan config:clear
+    - php artisan migrate:fresh --force
+    # (tuỳ chọn) php artisan db:seed --force
+    - |
+      if [ -f vendor/bin/pest ]; then
+        vendor/bin/pest --colors=always --log-junit=storage/test-results/junit.xml
+      else
+        vendor/bin/phpunit --colors=always --log-junit storage/test-results/junit.xml
+      fi
+  artifacts:
+    when: always
+    reports:
+      junit: storage/test-results/junit.xml
+    paths:
+      - storage/logs/
+      - storage/test-results/
+    expire_in: 1 week
+
+# =========================================================
+# QUALITY: PHPStan, Pint, PHP Insights (song song, dùng vendor từ prepare)
+# =========================================================
+quality:phpstan:
+  stage: quality
+  needs:
+    - job: prepare:composer
+      artifacts: true
+  script:
+    - cp -n phpstan.neon.dist phpstan.neon || true
+    - vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+  artifacts:
+    when: always
+    paths:
+      - phpstan.neon
+      - phpstan-baseline.neon
+      - storage/logs/
+    expire_in: 1 week
+
+quality:pint:
+  stage: quality
+  needs:
+    - job: prepare:composer
+      artifacts: true
+  script:
+    - vendor/bin/pint --test
+
+quality:phpinsights:
+  stage: quality
+  needs:
+    - job: prepare:composer
+      artifacts: true
+  script:
+    - mkdir -p storage/test-results
+    # Fail theo threshold; điều chỉnh trong phpinsights.php hoặc flags
+    - vendor/bin/phpinsights analyse --no-interaction --min-architecture=70 --min-quality=80 --min-complexity=70 --min-style=80
+    - vendor/bin/phpinsights analyse --format=json > storage/test-results/phpinsights.json || true
+  artifacts:
+    when: always
+    paths:
+      - storage/test-results/phpinsights.json
+    expire_in: 1 week
+
+# =========================================================
+# DEPLOY: STAGING (Docker on remote host, no registry)
+# - SSH vào server, rsync code vào releases/<timestamp>, link current,
+#   docker compose build/up, migrate, cache
+# =========================================================
+deploy:staging:docker:
+  stage: deploy
+  image: alpine:3.20
+  needs:
+    - test:php
+    - quality:phpstan
+    - quality:pint
+    - quality:phpinsights
+    - frontend:build
+  variables:
+    DEPLOY_ENV: "staging"
+    # Cấu hình các biến này trong CI/CD Variables (masked/protected):
+    # SSH_PRIVATE_KEY, DEPLOY_USER, DEPLOY_HOST, DEPLOY_PATH
+    # Tuỳ chọn: PHP_BIN (/usr/bin/php), COMPOSER_BIN (/usr/bin/composer)
+  before_script:
+    - *ssh_ready
+  script:
+    - export RELEASE=$(date +"%Y%m%d_%H%M%S")
+    - export REL_PATH="$DEPLOY_PATH/releases/$RELEASE"
+    # 1) Đồng bộ code tới server (bỏ .env, tests, node_modules…)
+    - >
+      rsync -az --delete
+      --exclude=".git" --exclude="node_modules" --exclude="tests"
+      --exclude=".env" --exclude=".env.*"
+      --exclude="storage/*.key"
+      --exclude="storage/framework/cache/data/*"
+      ./ "$DEPLOY_USER@$DEPLOY_HOST:$REL_PATH"
+    # 2) Link shared & đổi symlink current
+    - |
+      ssh "$DEPLOY_USER@$DEPLOY_HOST" bash -lc '
+        set -e
+        mkdir -p "$DEPLOY_PATH/shared/storage" "$DEPLOY_PATH/releases"
+        [ -f "$DEPLOY_PATH/shared/.env.staging" ] || (echo "Thiếu $DEPLOY_PATH/shared/.env.staging"; exit 1)
+
+        ln -snf "$DEPLOY_PATH/shared/storage" "$REL_PATH/storage"
+        ln -snf "$DEPLOY_PATH/shared/.env.staging" "$REL_PATH/.env"
+        ln -sfn "$REL_PATH" "$DEPLOY_PATH/current"
+      '
+    # 3) Docker compose build/up + migrate/cache
+    - |
+      ssh "$DEPLOY_USER@$DEPLOY_HOST" bash -lc '
+        set -e
+        cd "$DEPLOY_PATH/current"
+        docker compose -f docker-compose.staging.yml --env-file .env build --pull
+        docker compose -f docker-compose.staging.yml --env-file .env up -d --remove-orphans
+
+        docker compose -f docker-compose.staging.yml exec -T app php artisan migrate --force
+        docker compose -f docker-compose.staging.yml exec -T app php artisan config:cache
+        docker compose -f docker-compose.staging.yml exec -T app php artisan route:cache
+        docker compose -f docker-compose.staging.yml exec -T app php artisan view:cache
+      '
+  environment:
+    name: staging
+    url: https://staging.example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"   # đổi theo nhánh staging
+      when: manual
+      allow_failure: false
+  timeout: 30m
+
+# =========================================================
+# DEPLOY: PRODUCTION (SSH + rsync, releases + symlink current)
+# =========================================================
+deploy:production:
+  stage: deploy
+  image: alpine:3.20
+  needs:
+    - test:php
+    - quality:phpstan
+    - quality:pint
+    - quality:phpinsights
+    - frontend:build
+  variables:
+    DEPLOY_ENV: "production"
+    # Biến môi trường yêu cầu: SSH_PRIVATE_KEY, DEPLOY_USER, DEPLOY_HOST, DEPLOY_PATH
+    # Tuỳ chọn: PHP_BIN (/usr/bin/php), COMPOSER_BIN (/usr/bin/composer), MIGRATE (true/false), SEED (true/false)
+    MIGRATE: "true"
+    SEED: "false"
+  before_script:
+    - *ssh_ready
+  script:
+    - export RELEASE=$(date +"%Y%m%d_%H%M%S")
+    - export REL_PATH="$DEPLOY_PATH/releases/$RELEASE"
+    - >
+      rsync -az --delete
+      --exclude=".git" --exclude="node_modules" --exclude="tests"
+      --exclude=".env" --exclude=".env.*"
+      --exclude="storage/*.key"
+      --exclude="storage/framework/cache/data/*"
+      ./ "$DEPLOY_USER@$DEPLOY_HOST:$REL_PATH"
+    - |
+      ssh "$DEPLOY_USER@$DEPLOY_HOST" bash -lc '
+        set -e
+        mkdir -p "$DEPLOY_PATH/shared/storage" "$DEPLOY_PATH/releases" "$REL_PATH"
+        [ -f "$DEPLOY_PATH/shared/.env" ] || (echo "Thiếu $DEPLOY_PATH/shared/.env"; exit 1)
+
+        rm -rf "$REL_PATH/storage" || true
+        ln -snf "$DEPLOY_PATH/shared/storage" "$REL_PATH/storage"
+        ln -snf "$DEPLOY_PATH/shared/.env" "$REL_PATH/.env"
+
+        cd "$REL_PATH"
+        if [ -x "${COMPOSER_BIN:-/usr/bin/composer}" ]; then
+          ${COMPOSER_BIN:-/usr/bin/composer} install --no-dev --prefer-dist --no-interaction --no-progress
+        fi
+
+        ${PHP_BIN:-/usr/bin/php} artisan storage:link || true
+        ${PHP_BIN:-/usr/bin/php} artisan config:cache
+        ${PHP_BIN:-/usr/bin/php} artisan route:cache
+        ${PHP_BIN:-/usr/bin/php} artisan view:cache
+
+        if [ "${MIGRATE:-true}" = "true" ]; then
+          ${PHP_BIN:-/usr/bin/php} artisan migrate --force
+        fi
+        if [ "${SEED:-false}" = "true" ]; then
+          ${PHP_BIN:-/usr/bin/php} artisan db:seed --force
+        fi
+
+        ln -sfn "$REL_PATH" "$DEPLOY_PATH/current"
+      '
+  environment:
+    name: production
+    url: https://example.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"      # đổi theo nhánh production
+      when: manual
+      allow_failure: false
+  timeout: 30m
