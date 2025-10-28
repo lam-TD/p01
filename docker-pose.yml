@@ -1,0 +1,70 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: fastapi-dev
+    command: >
+      sh -lc '
+        uv sync --dev --frozen || uv sync --dev &&
+        exec uv run uvicorn ${APP_MODULE:-app.main:app} --host 0.0.0.0 --port 8000 --reload
+      '
+    volumes:
+      - ./:/workspace
+      - venv:/workspace/.venv
+      - uv_cache:/root/.cache/uv
+    environment:
+      # Đổi module nếu cần: "package.module:app"
+      APP_MODULE: ${APP_MODULE:-app.main:app}
+      # Ví dụ cấu hình DB cho app (nếu dùng Postgres bên dưới):
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://app:app@db:5432/app}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/docs >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  db:
+    image: postgres:16-alpine
+    container_name: fastapi-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+# (Tùy chọn) Bật pgAdmin — bỏ comment nếu cần UI quản trị DB
+#  pgadmin:
+#    image: dpage/pgadmin4:8
+#    environment:
+#      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+#      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+#    ports:
+#      - "5050:80"
+#    depends_on:
+#      db:
+#        condition: service_healthy
+#    restart: unless-stopped
+
+volumes:
+  venv:
+  uv_cache:
+  db_data:
