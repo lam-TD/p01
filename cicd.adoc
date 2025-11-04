@@ -1,0 +1,393 @@
+# Laravel 12 + GitLab CI/CD — Hướng dẫn cập nhật Database theo phiên bản (Staging/Production)
+
+**Phiên bản:** 1.0  
+**Đối tượng:** Dev/DevOps/PM phụ trách release Laravel 12 trên GitLab, hạ tầng Staging (đã có) và Production.  
+**Mục tiêu:** Cập nhật DB an toàn, rollbackable, hạn chế downtime/lock, có quy trình rõ ràng cho từng bản phát hành (version).
+
+---
+
+## Mục lục
+
+1. [Phạm vi & nguyên tắc](#phạm-vi--nguyên-tắc)  
+2. [Chiến lược “Expand → Backfill → Contract”](#chiến-lược-expand--backfill--contract)  
+3. [Workflow phát hành](#workflow-phát-hành)  
+   - 3.1 [Staging](#staging)  
+   - 3.2 [Production (2-đợt)](#production-2-đợt)  
+4. [GitLab CI/CD snippets](#gitlab-cicd-snippets)  
+   - 4.1 [Biến CI cần thiết](#biến-ci-cần-thiết)  
+   - 4.2 [Khối SSH dùng chung](#khối-ssh-dùng-chung)  
+   - 4.3 [Phát hiện thay đổi migration](#phát-hiện-thay-đổi-migration)  
+   - 4.4 [Chạy migrate & backfill trên Staging](#chạy-migrate--backfill-trên-staging)  
+   - 4.5 [Production: migrate (expand) & contract](#production-migrate-expand--contract)  
+5. [PostgreSQL: mẫu migration an toàn](#postgresql-mẫu-migration-an-toàn)  
+6. [Thiết kế Backfill: Artisan Command mẫu](#thiết-kế-backfill-artisan-command-mẫu)  
+7. [Checklist & Runbook](#checklist--runbook)  
+8. [Giám sát & Chỉ số](#giám-sát--chỉ-số)  
+9. [Phụ lục](#phụ-lục)  
+
+---
+
+## Phạm vi & nguyên tắc
+
+- **Laravel 12, PHP 8.3, PostgreSQL** (khuyến nghị đồng bộ phiên bản giữa CI/Staging/Prod).
+- Release qua **GitLab CI**, **deploy staging** đã hoàn thành; tài liệu này tập trung phần **DB update** cho từng version.
+- Ưu tiên **zero/minimal downtime** và **không khóa bảng dài**.
+- Migration nặng tách bước, có thể thực thi **ngoài giờ cao điểm** và **dưới ngưỡng timeout** an toàn.
+
+**Nguyên tắc vàng**  
+1) **An toàn trước**: không làm “table rewrite” khi chưa thật cần.  
+2) **Tách bước**: Expand (thêm) → Backfill (đổ dữ liệu) → Contract (dọn cũ).  
+3) **Tương thích 2 chiều**: bản code ở giai đoạn Expand phải chạy được với cả schema cũ/mới.  
+4) **Rollback nhanh**: nếu có sự cố, ưu tiên rollback **code**; DB chỉ **forward-fix** (tránh drop dữ liệu lập tức).  
+5) **Giám sát**: theo dõi lock, query time, backlog queue, CPU/IO DB trong suốt quá trình.
+
+---
+
+## Chiến lược “Expand → Backfill → Contract”
+
+- **Expand (không phá vỡ):**  
+  - Thêm cột **nullable**, bảng mới, index **CONCURRENTLY**, FK với `NOT VALID`.  
+  - Tránh `NOT NULL`/DEFAULT gây rewrite ngay lập tức.  
+- **Backfill (đổ dữ liệu):**  
+  - Dùng Artisan command batch/queue (ví dụ `--chunk=2000`).  
+  - Dựa vào index vừa tạo để giảm chi phí quét.  
+- **Contract (dọn cũ):**  
+  - Sau khi vận hành ổn định và không còn dùng dữ liệu/cột cũ:  
+    - Thiết lập `SET NOT NULL` khi dữ liệu đã đầy đủ.  
+    - `VALIDATE CONSTRAINT` cho FK.  
+    - Drop cột/index cũ.  
+  - **Lưu ý:** thực hiện ở **một phiên bản sau**, không gộp với Expand.
+
+---
+
+## Workflow phát hành
+
+### Staging
+
+1. **Deploy code** lên Staging (đã có).  
+2. **Migrate (expand)**: `php artisan migrate --force`.  
+3. **Backfill**: chạy Artisan command (manual hoặc tự động).  
+4. **Kiểm thử**: xác thực tính năng, đối chiếu dữ liệu, log.  
+5. **Chuẩn bị Production**: đánh dấu migration nặng, ước tính thời gian, chọn khung giờ off-peak.
+
+### Production (2-đợt)
+
+- **Đợt 1 — Expand + Backfill**
+  1. Deploy code **tương thích 2 chiều**.  
+  2. Chạy `php artisan migrate --force` (chỉ thao tác **Expand** an toàn).  
+  3. **Backfill** (command hoặc queue), theo dõi metric/lock.  
+- **Đợt 2 — Contract (dọn cũ)**
+  1. Khi dữ liệu ổn định và đã chuyển hẳn sang schema mới.  
+  2. Deploy bản dọn cũ, chạy migration **Contract** (NOT NULL/VALIDATE/DROP).
+
+> Không gộp Expand & Contract vào cùng release nếu thao tác có nguy cơ lock dài.
+
+---
+
+## GitLab CI/CD snippets
+
+> Dưới đây là các đoạn YAML có thể chèn vào `.gitlab-ci.yml`. Tùy dự án, bạn đổi tên stage/job/biến cho phù hợp.
+
+### Biến CI cần thiết
+
+Tạo trong **Settings → CI/CD → Variables** (Protected + Masked nếu nhạy cảm):
+
+- **SSH/Host**
+  - `SSH_PRIVATE_KEY`  
+  - `STG_HOST`, `STG_USER`, `STG_SSH_PORT` (mặc định 22), `STG_PATH`  
+  - `PROD_HOST`, `PROD_USER`, `PROD_SSH_PORT`, `PROD_PATH`  
+  - (khuyến nghị) `SSH_KNOWN_HOSTS`
+- **Ứng dụng**
+  - `STAGING_URL`, `PROD_URL` (nếu muốn hiển thị link environment)
+
+### Khối SSH dùng chung
+
+```yaml
+.ssh_setup: &ssh_setup
+  - 'which ssh-agent || (apk add --no-cache openssh-client || apt-get update && apt-get install -y openssh-client)'
+  - eval "$(ssh-agent -s)"
+  - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+  - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  - '[ -n "$SSH_KNOWN_HOSTS" ] && echo "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts || true'
+  - '[ -s ~/.ssh/known_hosts ] || ssh-keyscan -p "${STG_SSH_PORT:-22}" "$STG_HOST" >> ~/.ssh/known_hosts'
+  - chmod 644 ~/.ssh/known_hosts
+```
+
+### Phát hiện thay đổi migration
+
+```yaml
+detect:migrations:
+  stage: prepare
+  image: alpine:3.20
+  script:
+    - apk add --no-cache git
+    - |
+      set -e
+      BEFORE_SHA="${CI_COMMIT_BEFORE_SHA:-$CI_COMMIT_SHA}"
+      if git diff --name-only "$BEFORE_SHA" "$CI_COMMIT_SHA" | grep -E '^database/migrations/'; then
+        echo "MIGRATIONS_CHANGED=1" >> deploy.env
+      else
+        echo "MIGRATIONS_CHANGED=0" >> deploy.env
+      fi
+  artifacts:
+    reports:
+      dotenv: deploy.env
+```
+
+### Chạy migrate & backfill trên Staging
+
+```yaml
+db:migrate:staging:
+  stage: deploy
+  needs: ["detect:migrations", "deploy:staging"]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" && $MIGRATIONS_CHANGED == "1"'
+  before_script:
+    *ssh_setup
+  script:
+    - |
+      ssh -p "${STG_SSH_PORT:-22}" "$STG_USER@$STG_HOST" <<'EOF'
+      set -euo pipefail
+      cd "$STG_PATH"
+      php artisan migrate --force
+      EOF
+
+db:backfill:staging:
+  stage: deploy
+  needs: ["db:migrate:staging"]
+  when: manual
+  allow_failure: false
+  before_script:
+    *ssh_setup
+  script:
+    - |
+      ssh -p "${STG_SSH_PORT:-22}" "$STG_USER@$STG_HOST" <<'EOF'
+      set -euo pipefail
+      cd "$STG_PATH"
+      php artisan app:backfill-user-slug --chunk=2000
+      EOF
+```
+
+> **Gợi ý:** Đổi `app:backfill-user-slug` theo command thực tế của bạn. Có thể thêm `--queue=high` nếu chạy nền.
+
+### Production: migrate (expand) & contract
+
+```yaml
+db:migrate:prod:expand:
+  stage: deploy
+  when: manual
+  allow_failure: false
+  needs: ["detect:migrations", "deploy:production"]
+  rules:
+    - if: '$CI_COMMIT_TAG && $MIGRATIONS_CHANGED == "1"'
+  before_script:
+    *ssh_setup
+  script:
+    - |
+      ssh -p "${PROD_SSH_PORT:-22}" "$PROD_USER@$PROD_HOST" <<'EOF'
+      set -euo pipefail
+      cd "$PROD_PATH"
+      php artisan migrate --force
+      # (tuỳ chọn) backfill async:
+      php artisan app:backfill-user-slug --chunk=5000 --queue=high || true
+      EOF
+
+db:migrate:prod:contract:
+  stage: deploy
+  when: manual
+  allow_failure: false
+  before_script:
+    *ssh_setup
+  script:
+    - |
+      ssh -p "${PROD_SSH_PORT:-22}" "$PROD_USER@$PROD_HOST" <<'EOF'
+      set -euo pipefail
+      cd "$PROD_PATH"
+      php artisan migrate --path=database/migrations/2025_XX_XX_contract_cleanup.php --force
+      EOF
+```
+
+---
+
+## PostgreSQL: mẫu migration an toàn
+
+> Áp dụng khi cần index lớn, FK lớn, hoặc ràng buộc không muốn khóa bảng dài.
+
+**1) Index CONCURRENTLY** (ngoài transaction Laravel)
+
+```php
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+return new class extends Migration {
+    /** Cho phép chạy ngoài transaction để dùng CONCURRENTLY */
+    public bool $withinTransaction = false;
+
+    public function up(): void
+    {
+        DB::statement('CREATE INDEX CONCURRENTLY idx_users_email ON users (email)');
+    }
+
+    public function down(): void
+    {
+        DB::statement('DROP INDEX CONCURRENTLY IF EXISTS idx_users_email');
+    }
+};
+```
+
+**2) Foreign Key NOT VALID → VALIDATE sau**
+
+```php
+DB::statement('ALTER TABLE child
+  ADD CONSTRAINT child_parent_fk
+  FOREIGN KEY (parent_id) REFERENCES parent(id) NOT VALID');
+
+// Ở bản release sau (contract):
+DB::statement('ALTER TABLE child VALIDATE CONSTRAINT child_parent_fk');
+```
+
+**3) Tránh table rewrite khi thêm cột**
+
+- Thêm cột **nullable**, backfill xong mới `SET NOT NULL`.
+- Hạn chế set default giá trị không immutable ở cột lớn (dễ gây rewrite).
+
+**4) Timeout an toàn**
+
+```php
+DB::statement("SET lock_timeout TO '5s'");        // tránh chặn traffic
+DB::statement("SET statement_timeout TO '5min'"); // cắt bỏ truy vấn quá dài
+```
+
+---
+
+## Thiết kế Backfill: Artisan Command mẫu
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use App\Models\User;
+
+class BackfillUserSlug extends Command
+{
+    protected $signature = 'app:backfill-user-slug {--chunk=2000} {--queue=}';
+    protected $description = 'Backfill trường slug cho users theo batches an toàn';
+
+    public function handle(): int
+    {
+        $chunk = (int) $this->option('chunk') ?: 2000;
+
+        // Ví dụ chạy trực tiếp; có thể chuyển sang queue nếu --queue được cung cấp.
+        $this->info("Starting backfill with chunk={$chunk}");
+
+        User::query()
+            ->whereNull('slug')
+            ->orderBy('id')
+            ->chunkById($chunk, function ($users) {
+                DB::statement("SET lock_timeout TO '2s'");
+                DB::statement("SET statement_timeout TO '2min'");
+
+                foreach ($users as $u) {
+                    $u->slug = str($u->name)->slug('-');
+                    $u->save();
+                }
+
+                $this->info("Processed batch up to id=" . $users->last()->id);
+            });
+
+        $this->info('Backfill completed.');
+        return self::SUCCESS;
+    }
+}
+```
+
+> **Lưu ý:**  
+> - Dùng `chunkById` + `orderBy('id')` để ổn định.  
+> - Với dữ liệu cực lớn, cân nhắc **queue** + **monitoring** + **retry**.  
+> - Đảm bảo có index hỗ trợ truy cập nhanh (ví dụ `users(id)` mặc định).
+
+---
+
+## Checklist & Runbook
+
+**Trước khi lên Staging** ✅  
+- [ ] Mã migration chỉ chứa **Expand** cho bản này.  
+- [ ] Nếu có index lớn/FK lớn → dùng `CONCURRENTLY`/`NOT VALID`.  
+- [ ] Có Artisan command cho backfill (kèm tham số `--chunk`).  
+- [ ] Dựng dữ liệu mẫu gần giống Production (sanitized).  
+- [ ] Chạy `php artisan migrate --pretend` để xem SQL.
+
+**Staging** ✅  
+- [ ] Deploy code → `migrate --force`.  
+- [ ] Chạy backfill (manual/auto).  
+- [ ] Chạy test/QA, kiểm tra log, khóa (locks), performance.  
+- [ ] Ghi chú thời lượng, rủi ro, khung giờ thực thi.
+
+**Production — Đợt 1 (Expand + Backfill)** ✅  
+- [ ] Deploy code tương thích 2 chiều.  
+- [ ] `migrate --force` (chỉ thao tác expand).  
+- [ ] Chạy backfill (command/queue).  
+- [ ] Theo dõi metrics/lock cảnh báo.
+
+**Production — Đợt 2 (Contract)** ✅  
+- [ ] Xác nhận hệ thống không còn dùng cột/bảng cũ.  
+- [ ] Deploy bản contract cleanup.  
+- [ ] Thực thi `SET NOT NULL`/`VALIDATE CONSTRAINT`/`DROP` phần cũ.  
+- [ ] Kiểm tra lại test smoke, log, metrics.
+
+**Rollback/Forward-fix**  
+- Sự cố ngay sau Expand → rollback **code**; schema giữ nguyên.  
+- Sự cố trong Backfill → **pause**/sửa command/tiếp tục batch còn lại.  
+- Hạn chế **down migration phá dữ liệu**; ưu tiên **forward-fix** ở bản kế tiếp.
+
+---
+
+## Giám sát & Chỉ số
+
+- **DB Locks:** `pg_locks`, `pg_stat_activity`, truy vấn đang chặn/bị chặn.  
+- **Thời gian truy vấn:** p95/p99 tăng bất thường.  
+- **CPU/IO/Memory** của DB.  
+- **Queue Backfill:** số job còn lại, tốc độ xử lý, tỷ lệ lỗi.  
+- **Application errors** sau release (Sentry/NewRelic/Logs).
+
+**Lệnh tham khảo**
+
+```sql
+-- Sessions đang chạy & bị block
+SELECT pid, state, wait_event_type, wait_event, query
+FROM pg_stat_activity
+WHERE state <> 'idle'
+ORDER BY query_start DESC;
+```
+
+```sql
+-- Index bloat/usage (chỉ tham khảo; cần view/phím tắt sẵn có)
+-- Dùng các extension/queries nội bộ theo chính sách của bạn.
+```
+
+---
+
+## Phụ lục
+
+**Naming gợi ý cho migrations**  
+- `2025_01_15_120000_expand_add_users_slug_nullable.php`  
+- `2025_01_20_090000_contract_users_slug_set_not_null.php`
+
+**Quy ước biến môi trường**  
+- Staging: `STG_HOST`, `STG_USER`, `STG_SSH_PORT`, `STG_PATH`, `STAGING_URL`  
+- Production: `PROD_HOST`, `PROD_USER`, `PROD_SSH_PORT`, `PROD_PATH`, `PROD_URL`  
+- SSH: `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS`
+
+**Gợi ý thời điểm chạy**  
+- Migration nặng/backfill: **off-peak** (ban đêm/cuối tuần) + giám sát chặt.  
+- Contract: sau khi chắc chắn tính năng ổn định, không còn phụ thuộc schema cũ.
+
+---
+
+> **Kết luận:**  
+> Quy trình 2-đợt với “Expand → Backfill → Contract” giúp bạn cập nhật DB an toàn, giảm rủi ro lock/downtime, dễ rollback code và tiến hành dọn dẹp có kiểm soát. Hãy giữ các snippet CI/CD và command backfill ở repo `docs/` để team áp dụng thống nhất.
