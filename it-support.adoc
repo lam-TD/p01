@@ -1,0 +1,172 @@
+= Quy định chức năng Phòng Công nghệ Thông tin (IT Department)
+:doctype: article
+:revnumber: 1.0
+:revdate: 2025-11-21
+:toc:
+:toclevels: 3
+:icons: font
+
+[abstract]
+Tài liệu này mô tả chức năng, nhiệm vụ và phạm vi phối hợp của Phòng Công nghệ Thông tin trong công ty thiết kế web/phần mềm. Dùng làm tài liệu tham chiếu cho Ban giám đốc, HR và các phòng ban liên quan.
+
+== Thông tin chung
+
+* *Tên bộ phận:* Phòng Công nghệ Thông tin (IT Department)
+* *Báo cáo cho:* Giám đốc Điều hành (CEO) / Giám đốc Công nghệ (CTO) _(chỉnh sửa theo mô hình công ty)_
+* *Phạm vi áp dụng:* Toàn bộ hệ thống, nhân sự và tài sản CNTT của công ty
+
+=== Sứ mệnh
+
+Đảm bảo hạ tầng công nghệ thông tin ổn định, an toàn và hiệu quả, hỗ trợ tối đa cho hoạt động kinh doanh, phát triển phần mềm và vận hành nội bộ của công ty.
+
+== Chức năng chính của Phòng IT
+
+=== 1. Quản lý và vận hành hạ tầng CNTT nội bộ
+
+* Xây dựng, triển khai và vận hành:
+** Hệ thống mạng nội bộ, Internet, Wi-Fi, VPN.
+** Hệ thống máy chủ on-premise và/hoặc cloud.
+** Hệ thống lưu trữ, backup, các dịch vụ nội bộ (email, file server, source control, issue tracking, CI/CD…).
+* Đảm bảo hệ thống hoạt động ổn định, liên tục, đáp ứng yêu cầu của các phòng ban và dự án.
+* Thiết lập và duy trì cơ chế giám sát (monitoring), cảnh báo sự cố hạ tầng.
+
+=== 2. Hỗ trợ kỹ thuật cho các bộ phận và dự án
+
+* Hỗ trợ kỹ thuật cho:
+** Các team phát triển phần mềm (dev, QA, DevOps…).
+** Các bộ phận vận hành và phòng ban nội bộ khác.
+* Chuẩn bị, cài đặt, cấu hình:
+** Thiết bị làm việc cho nhân viên (PC, laptop, thiết bị ngoại vi).
+** Phần mềm, công cụ làm việc theo tiêu chuẩn công ty.
+* Hỗ trợ xử lý sự cố phần cứng, phần mềm, môi trường làm việc hằng ngày.
+
+=== 3. Quản lý an ninh thông tin và tuân thủ
+
+* Xây dựng và áp dụng các chính sách bảo mật thông tin:
+** Chính sách mật khẩu, xác thực, truy cập từ xa.
+** Quy định sử dụng thiết bị cá nhân, thiết bị lưu trữ, email, các kênh chia sẻ file.
+* Quản lý tài khoản và phân quyền truy cập theo nguyên tắc *tối thiểu cần thiết (least privilege)*.
+* Triển khai các giải pháp bảo mật:
+** Antivirus/EDR, firewall, mã hóa dữ liệu, giám sát log cơ bản.
+** Cơ chế phát hiện và phản hồi khi có dấu hiệu bất thường.
+* Phối hợp với Ban giám đốc và các phòng ban trong:
+** Kiểm tra, đánh giá bảo mật định kỳ.
+** Trả lời câu hỏi, biểu mẫu bảo mật từ khách hàng/đối tác (security questionnaire, audit…).
+
+=== 4. Quản lý tài khoản, phần mềm và bản quyền
+
+* Quản lý vòng đời tài khoản người dùng:
+** Tạo mới cho nhân sự mới (onboarding).
+** Thay đổi khi nhân sự chuyển vị trí/phòng ban.
+** Thu hồi khi nhân sự nghỉ việc (offboarding).
+* Quản lý license phần mềm:
+** Mua sắm, phân bổ, theo dõi sử dụng, gia hạn.
+** Đảm bảo tuân thủ bản quyền, tránh sử dụng phần mềm lậu.
+* Đề xuất, đánh giá, lựa chọn:
+** Các công cụ và dịch vụ CNTT phục vụ hoạt động công ty.
+** Giải pháp tối ưu chi phí nhưng vẫn đảm bảo chất lượng.
+
+=== 5. Quản lý dữ liệu và hệ thống lưu trữ nội bộ
+
+* Xây dựng cấu trúc lưu trữ:
+** Tài liệu nội bộ, tài liệu khách hàng, tài liệu dự án.
+** Source code, artifact, backup.
+* Phân quyền truy cập theo:
+** Phòng ban.
+** Dự án.
+** Vai trò người dùng.
+* Tổ chức cơ chế sao lưu và khôi phục (backup & restore) cho:
+** Dữ liệu quan trọng (hợp đồng, tài liệu khách hàng, hệ thống nghiệp vụ).
+** Hệ thống ứng dụng nội bộ.
+* Đảm bảo dữ liệu:
+** Được lưu trữ an toàn, có kiểm soát.
+** Hạn chế tối đa nguy cơ rò rỉ, thất thoát.
+
+=== 6. Vận hành dịch vụ hỗ trợ IT (IT Helpdesk / Service Desk)
+
+* Thiết lập kênh tiếp nhận yêu cầu hỗ trợ:
+** Email chung của IT (ví dụ: `it@company.com`).
+** Hệ thống ticket (service desk).
+** Kênh chat nội bộ (#it-support…).
+* Xây dựng quy trình xử lý:
+** Sự cố CNTT (incident management).
+** Yêu cầu dịch vụ CNTT (service request).
+* Thiết lập SLA nội bộ (ví dụ):
+** Sự cố nghiêm trọng (mất dịch vụ chính): phản hồi trong 30–60 phút.
+** Yêu cầu thông thường: xử lý trong 1–2 ngày làm việc.
+* Xây dựng và duy trì *IT Knowledge Base*:
+** Hướng dẫn sử dụng hệ thống.
+** FAQ và các quy trình đơn giản để người dùng tự xử lý.
+
+=== 7. Lập kế hoạch, chiến lược và tối ưu chi phí CNTT
+
+* Đề xuất chiến lược phát triển hạ tầng CNTT phù hợp với định hướng kinh doanh.
+* Lập và quản lý ngân sách CNTT hàng năm:
+** Thiết bị, phần mềm, dịch vụ cloud.
+** Chi phí bảo trì, gia hạn license, dịch vụ thuê ngoài.
+* Tối ưu chi phí vận hành:
+** Cân nhắc giữa on-premise và cloud.
+** Rà soát định kỳ việc sử dụng license, tài nguyên.
+* Đề xuất các sáng kiến:
+** Tự động hóa, chuẩn hóa quy trình IT.
+** Áp dụng công nghệ mới để tăng hiệu quả làm việc.
+
+== Nhiệm vụ chính của Trưởng Phòng IT
+
+* Chịu trách nhiệm toàn diện trước Ban giám đốc về hoạt động của Phòng IT.
+* Xây dựng cơ cấu tổ chức, phân công nhiệm vụ, đánh giá hiệu suất của nhân sự IT.
+* Lập kế hoạch đào tạo, nâng cao năng lực cho đội ngũ IT.
+* Xây dựng, ban hành và cập nhật:
+** Quy trình, quy định liên quan đến CNTT trong công ty.
+** Chính sách bảo mật, sử dụng hệ thống thông tin.
+* Chủ trì xử lý các sự cố nghiêm trọng:
+** Mất dịch vụ quan trọng (email, hệ thống lõi, hạ tầng chính).
+** Sự cố rò rỉ dữ liệu, tấn công bảo mật.
+* Là đầu mối làm việc với:
+** Nhà cung cấp ISP, cloud, phần mềm, bảo mật.
+** Khách hàng/đối tác về các vấn đề liên quan đến hệ thống CNTT.
+* Định kỳ báo cáo cho Ban giám đốc:
+** Tình hình vận hành hệ thống.
+** Các sự cố, rủi ro và biện pháp khắc phục.
+** Kế hoạch cải tiến, đầu tư nâng cấp.
+
+== Phạm vi phối hợp với các bộ phận khác
+
+=== Phối hợp với Phòng Kinh doanh, PM, Delivery
+
+* Đảm bảo hạ tầng và môi trường:
+** Phục vụ phát triển, test, staging, demo, production (nếu có).
+** Hỗ trợ triển khai, vận hành hệ thống cho khách hàng (nếu thuộc phạm vi IT).
+* Tư vấn giải pháp hạ tầng, bảo mật:
+** Khi xây dựng đề xuất kỹ thuật cho khách hàng.
+** Khi khách hàng yêu cầu đánh giá bảo mật, hiệu năng, tính sẵn sàng.
+
+=== Phối hợp với Phòng Nhân sự (HR)
+
+* Quy trình Onboarding:
+** Tài khoản, thiết bị, quyền truy cập hệ thống cho nhân sự mới.
+* Quy trình Offboarding:
+** Thu hồi quyền, thiết bị, dữ liệu khi nhân sự nghỉ việc.
+* Phối hợp đào tạo nội bộ:
+** An ninh thông tin, sử dụng hệ thống đúng quy định.
+** Nâng cao nhận thức bảo mật cho toàn công ty.
+
+=== Phối hợp với Phòng Tài chính (Finance)
+
+* Lập kế hoạch ngân sách CNTT:
+** Thiết bị, phần mềm, dịch vụ cloud và bảo mật.
+* Theo dõi và tối ưu chi phí:
+** Mua sắm, gia hạn, đánh giá hiệu quả sử dụng.
+
+=== Phối hợp với Ban Giám đốc
+
+* Trình bày và cập nhật định kỳ:
+** Chiến lược và lộ trình phát triển CNTT.
+** Các rủi ro lớn về hệ thống, bảo mật.
+* Đề xuất:
+** Các dự án đầu tư CNTT.
+** Các chính sách, quy định liên quan đến sử dụng hệ thống CNTT.
+
+== Phiên bản tóm tắt (dùng cho Profile/Catalog)
+
+Phòng Công nghệ Thông tin (IT) chịu trách nhiệm xây dựng, vận hành và bảo vệ toàn bộ hạ tầng công nghệ của công ty; cung cấp môi trường làm việc ổn định, an toàn cho các phòng ban; hỗ trợ trực tiếp cho các team phát triển phần mềm; quản lý tài khoản, dữ liệu, phần mềm và an ninh thông tin; đồng thời đề xuất chiến lược và giải pháp CNTT nhằm tối ưu hiệu quả vận hành và chi phí cho doanh nghiệp.
